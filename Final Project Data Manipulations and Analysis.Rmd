@@ -1,0 +1,332 @@
+---
+title: "Final Project Data Manipulations and Analysis"
+author: "Emily Delle"
+date: "2026-05-06"
+output: html_document
+---
+
+Load any libraries I will need
+```{r Libraries, message=FALSE}
+library(tidyverse)
+library(car)
+library(emmeans)
+library(lme4)
+library(binom)
+```
+
+## Data from "Dogs recognize dog and human emotion"
+This data is from Albuquerque et. al.
+Link to paper: https://royalsocietypublishing.org/rsbl/article/12/1/20150883/50723/Dogs-recognize-dog-and-human-emotionsDogs 
+```{r Upload Data, results = 'hide'}
+dogs <- read.csv("/Users/emilydelle/Desktop/Bio611/Final Project/Data_Dogs recognize dog and human emotions.csv")
+```
+
+I uploaded the supplemental data from a word document table into an excel file and saved it as a csv file. The supplemental data included dog names, the sex of the dog, the breed, age, and neuter status. I added a column for AKC (American Kennel Club) groups to put each dog breed into their respective group.
+Word document link: 
+```{r Uplaod supplemental data, results = 'hide'}
+dogssupp <- read.csv("/Users/emilydelle/Desktop/Bio611/Final Project/Dogs supplemental data.csv")
+#This data has 6 variables and 17 observations. 
+```
+
+Need to combine the data to add the breed, age, and neuter status
+```{r Manipulate the Data, results = 'hide'}
+#Renames the column with the dog numbers to dog_id
+dogs <- rename(dogs, dog_id = dog)
+
+#Adds dog id numbers to the supp data
+dogssupp$dog_id <- c(2, 4, 6, 7, 8, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23)
+
+#Relocates the added column to be the first column (optional)
+dogssupp <- dogssupp %>%
+  relocate(dog_id)
+
+#Combines the two data frames and orders them
+combined <- left_join(dogs, dogssupp, by = "dog_id") %>%
+  relocate(dog_id, Dog, Sex, Breed, AKC.Group, Nueter.Status)
+
+#Filter out all the control indexes by filtering out the NA's in the index column
+combined <- combined %>%
+  filter(!is.na(index))
+```
+
+
+
+## Variables seen in the analysis:
+1. Breed Group: Each dog breed fits into a category for the American Kennel Club and is used for dog shows to see how well the dog performs with respect to what it was breed for, basically how closely the dogs conform to their breed standard. There are 7 Categories: Sporting, Hound, Working, Terrier, Toy, Non-Sporting, and Herding. 6 of the 7 groups are represented in this data set. The AKC website was used to categorize the dogs into groups.
+https://www.akc.org/expert-advice/lifestyle/7-akc-dog-breed-groups-explained/ 
+
+2. Index (Congruence Index): (C-I)/T, where C and I represents the amount of time the dog looked at the congruent (facial expression matching emotional vocalization (C), and incongruent faces (I)), and T represents total looking time (looking left + looking right + looking center) for the given trial. This was used to measure the dog's sensitivity to audio-visual emotional cues delivered simultaneously. This variable is numeric, positive and negative, and between 0 and 1. Positive indices indicate the dog matched the audio to the facial expression and negative indices indicate the dog did not match the audio to the correct facial expression. 
+
+3. Matching: This is a binary variable, where 1=matched and 0=unmatched. If the dog during the trial matched the face showing the congruent expression to the audio stimulus (if they heard laughter and looked longer at the smiling face), it was said the dog matched. If the dog looked longer at the incongruent face to the audio cue, it was said they did not match. Negative congruence indices correspond to any row with 0 as it matching number. 
+
+4. Age: The age of the dogs used as subjects were recorded.
+
+5. Sex: The sex of the dogs used as subjects were recorded.
+
+6. Spp_sti: The species of the stimulus was an experimental variable. The dog could had been shown a dog's face or a human's face (with the respective species audio with the emotional vocalization)
+
+7. Percent Correct: I used this to graphically convey the probability of a correct match, using the binary variable of matching to calculate the probability. 
+
+## Question 1: Does AKC breed group effect the congruence index?
+
+Response Variable: Index
+Predictor Variable: Breed group
+
+```{r Questions 1 Intial plot, results='hide', fig.show='hide'}
+#Plot
+ggplot(combined, aes(AKC.Group, index, color = AKC.Group)) +
+  geom_boxplot(show.legend = F) +
+  geom_point(show.legend = F, size = 2, alpha = 0.5) +
+  theme_classic(base_size = 10)
+```
+Look at the data and factor AKC group
+```{r Question 1 Look at data and factor AKC group, results='hide'}
+glimpse(combined)
+combined$AKC.Group <- as.factor(combined$AKC.Group)
+```
+
+Make the ANOVA model
+```{r Question 1 Model}
+#ANOVA to compare the mean index between group
+model_Q1 <- lm(index ~ AKC.Group, data = combined)
+summary(model_Q1)
+
+##model's p-value is 0.5669. No, there is no affect of dog breed on index value.
+```
+
+Check Assumptions
+1. Each group is assumed to be randomly selected from the populations - I will assume yes.
+2. Each of the groups are normal - Shapiro Wilks and normal probability plot
+3. Variances or homogeneous - Levene's or Bartlett's Test
+```{r Question 1 Check Assumptions, results='hide', fig.show='hide', echo=FALSE}
+#Normality
+shapiro.test(residuals(model_Q1))
+##p-value = 0.0004009 - Data is normal
+qqnorm(combined$index)
+qqline(combined$index, col = "red")
+##Looks ok, not great
+
+#Test for Variance
+#Levene's test
+leveneTest(index ~ AKC.Group, data = combined)
+##p-value = 0.6757
+#Bartlett's test
+bartlett.test(index ~ AKC.Group, data = combined)
+##Both tests yield a p-value bigger than 0.05. Will assume equal variance.
+
+```
+
+Plot the Means and Confidence Intervals
+```{r Question 1 Plot}
+
+#Calculate the Means and the confidence intervals of the indices per AKC group to use for graphing.
+emm <- emmeans(model_Q1, ~ AKC.Group)
+ci_df <- as.data.frame(confint(emm))
+
+#Plot the means and the confidence intervals with each trial index overlaid 
+ggplot(ci_df, aes(x = AKC.Group, y = emmean, color = AKC.Group)) +
+  geom_point() + #Adds mean point
+  geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL)) + #Add confidence intervals
+  geom_point(data = combined, aes(x = AKC.Group, y = index, color = AKC.Group), position = position_jitter(width = 0.1), alpha = 0.6, shape = 1) + #Add raw data points
+  xlab("AKC Group") +
+  ylab("Congruence Index") +
+  theme_classic() +
+  theme(legend.position = "none") 
+```
+
+## Question 2: Are certain AKC groups more likely to match the audio cue to the visual emotion? (congruence).
+
+Independent Variable: AKC Group
+Dependent Variable: Matching (Binary: 1 = yes, 0 = no)
+
+Make the model with random effect
+```{r Question 2 Model 2.1, message=FALSE}
+#IV -> Categorical Predictor with 6 levels
+#DV -> Binary Outcome
+#Need a logistical model
+
+#Each dog contributes multiple trials with different combinations, so we need to account for the random effect 
+model_Q2.1 <- glmer(matching ~ AKC.Group + (1 | dog_id), data = combined, family = binomial)
+summary(model_Q2.1)
+#AIC - 250.2, None of the p-values are significant
+```
+
+Make the model without random effects
+```{r Question 2 Model 2.2}
+#Variance of Dog_id was 0, so I took out the random effect term.
+model_Q2.2 <- glm(matching ~ AKC.Group, data = combined, family = binomial)
+summary(model_Q2.2)
+#AIC = 248.18, none of the p-values are significant.
+```
+
+```{r Question 2 Calculation for plotting, results='hide'}
+#Calculate percent correct from the matching variable by AKC breed group
+AKCGroup_summary <- combined %>%
+  group_by(AKC.Group) %>%
+  summarise(n_trials = n(), 
+            percent_correct = mean(matching) * 100, 
+            proportion_correct = mean(matching),
+    se = sqrt((proportion_correct * (1 - proportion_correct)) / n_trials), # Standard error for proportions
+    lower_CI = (proportion_correct - 1.96 * se) * 100,
+    upper_CI = (proportion_correct + 1.96 * se) * 100)  # 95% confidence intervals
+
+#Calculate percent correct by individual dog
+dog_summary <- combined %>%
+  group_by(dog_id, AKC.Group) %>%
+  summarise(
+    percent_correct = mean(matching) * 100,
+    trials = n(),
+    .groups = "drop")
+```
+
+```{r Question 2 Plotting the Data, echo=FALSE, results='hide', fig.show='hide'}
+#Without individual dog percentages
+ggplot(AKCGroup_summary, aes(x = AKC.Group, y = percent_correct, color = AKC.Group)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower_CI, ymax = upper_CI), width = 0.2) +
+  coord_cartesian(ylim = c(0, 120)) +
+  scale_y_continuous(breaks = c(0, 25, 50, 75, 100)) +
+  ylab("Percent Correct") +
+  xlab("AKC Breed Group") +
+  theme_classic()
+```
+
+Plot the Data
+```{r Question 2 Plotting the Data with Individual Points}
+#With individual dog percentages
+ggplot(AKCGroup_summary, aes(x = AKC.Group, y = percent_correct, color = AKC.Group)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lower_CI, ymax = upper_CI), width = 0.2) +
+  geom_jitter(data = dog_summary, aes(x = AKC.Group, y = percent_correct), width = 0.1, height = 0, size = 3, shape = 1) +
+  coord_cartesian(ylim = c(0, 120)) +
+  scale_y_continuous(breaks = c(0, 25, 50, 75, 100)) +
+  ylab("Percent Correct") +
+  xlab("AKC Breed Group") +
+  theme_classic()
+```
+
+
+## Question 3: Does age correlate to the ability to correcly match the audio cue to the visual emotion?
+
+Make the model considering random effects
+```{r Question 3 Model 3.1, message=FALSE}
+model_Q3.1 <- glmer(matching ~ Age + (1 | dog_id), data = combined, family = binomial)
+summary(model_Q3.1)
+#AIC = 243.3, age p-value is not significant. 
+```
+
+Make the Model without random effects
+```{r Question 3 Model 3.2}
+#Variance of Dog_id was 0, so I took out the random effect term.
+model_Q3.2 <- glm(matching ~ Age, data = combined, family = binomial)
+summary(model_Q3.2)
+#AIC - 241.35, age p-value is not significant.
+```
+
+
+Plot the data
+```{r Question 3 Plotting the Data, message=FALSE}
+#Calculate the percent correct per dog 
+dog_age_summary <- combined %>%
+  group_by(dog_id, Age) %>%
+  summarise(
+    percent_correct = mean(matching) * 100,
+    trials = n(),
+    .groups = "drop"
+  )
+
+#Plot the regression with the smooth lm function
+ggplot(dog_age_summary, aes(x = Age, y = percent_correct)) +
+  geom_point(shape = 1, size = 3, stroke = 1.2) +
+  geom_smooth(method = "lm", se = TRUE) +
+  coord_cartesian(ylim = c(0, 100)) +
+  scale_y_continuous(breaks = c(0, 25, 50, 75, 100)) +
+  ylab("Percent Correct") +
+  xlab("Age (years)") +
+  theme_classic()
+```
+
+## Question 4: Do female dogs differ in their ability to correctly match audio and visual stimuli compared to male dogs. 
+```{r Question 4 Model 4.1}
+#Model with just sex as a predictor
+model_Q4.1 <- glm(matching ~ Sex, data = combined, family = binomial)
+summary(model_Q4.1)
+```
+
+```{r Question 4 Model 4.2}
+#Model investigating interaction between two predictors
+model_Q4.2 <- glm(matching ~ Sex*spp_sti, data = combined, family = binomial)
+summary(model_Q4.2)
+```
+
+```{r Question 4 Plotting model 4.1, results='hide', fig.show='hide'}
+#Calculate the percent per dog per sex
+dog_sex_summary <- combined %>%
+  group_by(dog_id, Sex) %>%
+  summarise(
+    percent_correct = mean(matching) * 100,
+    .groups = "drop"
+  )
+
+#Calculate the percent per sex
+sex_summary <- combined %>%
+  group_by(Sex) %>%
+  summarise(correct = sum(matching), total = n(), .groups = "drop") %>%
+  rowwise() %>%
+  mutate(ci = list(binom.confint(correct, total, method = "wilson")),
+    percent_correct = (correct / total) * 100,
+    lower_CI = ci$lower[[1]] * 100,
+    upper_CI = ci$upper[[1]] * 100)
+
+#Plot just comparing sex to percent correct with the individual point points
+ggplot() +
+  geom_point(data = sex_summary, aes(x = Sex, y = percent_correct, color = Sex), size = 5) +
+  geom_errorbar(data = sex_summary, aes(x = Sex, ymin = lower_CI, ymax = upper_CI), width = 0.15) +
+  geom_jitter(data = dog_sex_summary, aes(x = Sex, y = percent_correct, color = Sex), width = 0.08, height = 0, shape = 1, size = 3, stroke = 1.2) +
+  coord_cartesian(ylim = c(0, 100)) +
+  scale_y_continuous(breaks = c(0, 25, 50, 75, 100)) +
+  ylab("Percent Correct") +
+  xlab("Sex") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+```
+
+```{r Question 4 Plotting Model 4.2}
+#Calculate the percent correct per dog per sex per species stimulus
+dog_interaction <- combined %>%
+  group_by(dog_id, Sex, spp_sti) %>%
+  summarise(
+    percent_correct = mean(matching) * 100,
+    .groups = "drop"
+  )
+#Interaction Plot
+ggplot(dog_interaction, aes(x = spp_sti, y = percent_correct, color = Sex)) +
+  stat_summary(fun = mean, geom = "point", size = 4, position = position_dodge(width = 0.25)) +
+  stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.15, position = position_dodge(width = 0.25)) +
+  stat_summary(fun = mean, geom = "line", aes(group = Sex), position = position_dodge(width = 0.25)) + # Connect means with lines
+  coord_cartesian(ylim = c(0, 100)) +
+  scale_y_continuous(breaks = c(0, 25, 50, 75, 100)) +
+  labs(x = "Stimulus Species", y = "Percent Correct", color = "Dog Sex") +
+  theme_classic()
+```
+
+## Reflection Questions
+1. Rank your visualizations from 1-5 (or more) in the order in which you would like them to be evaluated.
+Ranked first is figure 11, showing the interactions. Then I like figure 9, showing the percent correct with the AKC groups. Ranked third is figure 10, showing the percent correct slightly declining with age. Ranked last is figure 8, showing the congruence index across the AKC groups. I feel this was not a great way to analyze the data.
+2. Which visualizations, if any, were you most pleased with creating and why?
+My favorite visualization was the interaction graph. I was pleased to finally get some significant results and found it interesting that the lines are intersecting. 
+3. Did you have any issues accessing the data for your project? How did you resolve these?
+I did not have trouble accessing the data from my main paper, as the researchers used Dryad, making it very easy to get the excel file for the main data and the word document with the supplemental information. However, I did have trouble finding additional sources with relevant information that I could add to the main data, because it was such a specific research topic and methodology.
+4. How did your project topic evolve from what you first envisioned, and why?
+I had initially envisioned doing something revolving around competitions cheerleading/cheerleading injuries and found that there was no good database that tracked this information and the paper with data that I found did not have the data easily available, so I abandoned that topic and I had to go to one of my back-up ideas. 
+5. Did you have issues related to any analyses that you performed, the timeline of the project, your computer or other tools necessary, etc? How did you resolve or workaround these issues?
+I don’t think there was a problem with the analyses, but the structure of the data made doing analyses difficult because of all the variables from the methodology. I had to take some time to totally understand each variable presented in the orginial data set. 
+6. If you had more time, what would you change (e.g., things you might add or remove)?
+I think I would do may more in-depth research on each dog breed to see if there was a better way to group them and see if I could better analyse the congruence index considering its positive and negative numbers. 
+7. Are you happy with the final results of your project?
+For the most part yes. I really like that you introduced us to Story Maps. It made creating this project really fun and was a cool way to present the project.
+8. May I use your project and/or visualizations as an example for later classes? If so, would you like me to redact your name?
+Yes, and I do not care if you keep my name attached or not. 
+9. What advice would you give to future students taking this course?
+I think I would tell future students to pick a project topic that is closer to their research topic. That way if there are any data sets that are similar to the ones they will create, they can spend time creating R scripts relevant to their projects.
